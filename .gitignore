@@ -1,0 +1,31 @@
+# IDE
+.qoder/
+.specify/
+.vscode/
+.idea/
+
+# Python
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+
+# Isaac Lab / Hydra
+outputs/
+
+# Training logs and models
+logs/
+
+# MuJoCo
+MUJOCO_LOG.TXT
+
+# Datasets (large files, users provide their own)
+dataset/gmr/
+dataset/*.npz
+
+# ONNX exports
+*.onnx
+
+# Temp files
+*.tmp
+*.bak
