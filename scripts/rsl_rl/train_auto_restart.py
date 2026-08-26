@@ -17,10 +17,21 @@ Multi-GPU (2 GPUs):
     python scripts/rsl_rl/train_auto_restart.py --nproc_per_node 2 [same args as train.py]
 
 Example:
-    python scripts/rsl_rl/train_auto_restart.py --nproc_per_node 2 \\
-        --task=Tracking-Flat-DR02_PRO \\
-        --logger tensorboard --log_project_name logs/ \\
-        --run_name motion_name --headless --max_iterations 200000
+    # Single GPU
+    python scripts/rsl_rl/train_auto_restart.py \
+        --task=Tracking-Flat-DR02_PRO \
+        --registry_name dataset/gmr/jugong.npz \
+        --logger tensorboard --log_project_name logs/ \
+        --run_name jugong --headless \
+        --num_envs 4096 --max_iterations 30000
+
+    # Multi-GPU (2 GPUs)
+    python scripts/rsl_rl/train_auto_restart.py --nproc_per_node 2 \
+        --task=Tracking-Flat-DR02_PRO \
+        --registry_name dataset/gmr/jugong.npz \
+        --logger tensorboard --log_project_name logs/ \
+        --run_name jugong --headless --distributed \
+        --num_envs 4096 --max_iterations 30000
 """
 
 import argparse

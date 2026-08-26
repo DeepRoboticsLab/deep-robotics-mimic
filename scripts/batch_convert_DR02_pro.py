@@ -14,9 +14,10 @@ For each source NPZ in the input directory:
 
 Usage:
     python scripts/batch_convert_DR02_pro.py \
-        --input_dir /home/ubuntu/deep_robotics/motion_capture_data_process/output \
-        --output_dir /home/ubuntu/deep_robotics/deep-robotics-mimic/dataset \
-        --num_envs 10000 --output_fps 50 --headless
+        --input_dir /path/to/source_npz_folder \
+        --output_dir dataset/ \
+        --num_envs 10000 --output_fps 50 \
+        --retarget_format gmr --headless
 """
 
 from __future__ import annotations

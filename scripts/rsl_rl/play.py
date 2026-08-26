@@ -2,7 +2,9 @@
 
 Example:
     python scripts/rsl_rl/play.py --task=Tracking-Flat-DR02_PRO \
-        --checkpoint_path logs/rsl_rl/DR02_pro_flat/<run>/model_50000.pt --num_envs 2
+        --motion_file dataset/gmr/jugong.npz \
+        --checkpoint_path logs/rsl_rl/DR02_pro_flat/<run>/model_50000.pt \
+        --num_envs 2 --headless
 """
 
 """Launch Isaac Sim Simulator first."""

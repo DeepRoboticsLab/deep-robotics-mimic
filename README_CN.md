@@ -2,13 +2,9 @@
 
 基于 Isaac Lab 的人形机器人运动跟踪训练。训练 PPO 策略跟踪参考动作（DeepMimic 风格奖励）。主要机器人：**DR02_pro**。
 
-## 安装
+## 1. 安装
 
-1. Install [Isaac Lab v2.3.2](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html) (conda recommended)
-
-2. **PyTorch 2.7.0, CUDA 12.8** — other versions will degrade simulation speed
-
-3. **rsl-rl-lib 5.0.1** — `pip install rsl-rl-lib==5.0.1`
+- 安装依赖环境（Isaac Lab v2.3.2 + PyTorch 2.7.0 + rsl-rl-lib 5.0.1）
 
 ```bash
 conda create -n mimic python=3.11
@@ -31,7 +27,7 @@ pip install rsl-rl-lib==5.0.1
 pip list | grep -E "torch|isaac|rsl|stable"
 ```
 
-4. 克隆并安装：
+- 克隆并安装：
 
 ```bash
 git clone https://github.com/DeepRoboticsLab/deep-robotics-mimic.git
@@ -39,15 +35,15 @@ cd deep-robotics-mimic
 python -m pip install -e source/whole_body_tracking
 ```
 
-## 数据流水线
+## 2. 数据格式转换
 
-原始流水线：BVH/SMPLX → `.pkl`（重定向）→ `.npz` → FK `.npz` → 训练 → `.json`（部署）
+完整转换流程：BVH/SMPLX → `.pkl`（重定向）→ `.npz` → FK `.npz` → 训练 → `.json`（部署）
 
-### BVH/SMPLX → pkl -> npz（重定向）
+### 2.1. BVH/SMPLX → pkl → npz（重定向）
 
 重定向由配套项目 `deep-robotics-retarget` 完成，其输出为机器人关节 `.pkl` 文件。
 
-### npz → FK npz（正运动学，需要 Isaac Sim）
+### 2.2. npz → FK npz（正运动学，需要 Isaac Sim）
 
 **单文件：**
 ```bash
@@ -73,20 +69,20 @@ python scripts/batch_convert_DR02_pro.py \
 
 支持的 `--retarget_format`：`deep_retarget`、`omniretarget`、`gmr`
 
-### npz → json（供部署控制器使用）
+### 2.3. npz → json（供部署控制器使用）
 
 ```bash
 python scripts/npz_to_json.py --input <file>.npz --output <file>.json
 ```
 
-## 可视化（需要 Isaac Sim）
+## 3. 可视化（Isaac Sim，需要 Isaac Sim）
 
 ```bash
 python scripts/replay_merged.py --folder dataset/gmr/   # FK npz 文件文件夹
 python scripts/replay_merged.py --file <file>.npz --fk_file <fk_file>.npz  # 旧版单文件模式
 ```
 
-## 可视化（MuJoCo，无需 Isaac Sim）
+## 4. 可视化（MuJoCo，无需 Isaac Sim）
 
 ```bash
 pip install mujoco
@@ -96,9 +92,9 @@ python scripts/replay_npz_mujoco.py dataset/gmr/<motion>.npz
 python scripts/replay_npz_mujoco.py dataset/gmr/<motion>.npz --verify   # FK 精度验证
 ```
 
-## 训练（需要 Isaac Sim）
+## 5. 训练（需要 Isaac Sim）
 
-### 单 GPU
+### 5.1. 单 GPU
 
 ```bash
 python scripts/rsl_rl/train.py \
@@ -112,7 +108,7 @@ python scripts/rsl_rl/train.py \
   --max_iterations 100000
 ```
 
-### 多 GPU
+### 5.2. 多 GPU
 
 ```bash
 python -m torch.distributed.run --nnodes=1 --nproc_per_node=2 \
@@ -128,7 +124,7 @@ python -m torch.distributed.run --nnodes=1 --nproc_per_node=2 \
   --max_iterations 200000
 ```
 
-### 从检查点续训
+### 5.3. 从检查点续训
 
 ```bash
 python scripts/rsl_rl/train.py \
@@ -147,7 +143,7 @@ python scripts/rsl_rl/train.py \
 
 `--checkpoint` 只需文件名。`--load_run` 是 `logs/rsl_rl/{experiment_name}/` 下的文件夹名。
 
-### NaN 自动重启（长时间训练推荐）
+### 5.4. NaN 自动重启（长时间训练推荐）
 
 将 `train.py` 包装在子进程中运行。检测到 NaN 损失时，自动从约 1000 迭代前的检查点重启。最多重试 10 次。
 
@@ -176,11 +172,11 @@ python scripts/rsl_rl/train_auto_restart.py \
   --max_iterations 200000
 ```
 
-### 可用任务
+### 5.5. 可用任务
 
 `Tracking-Flat-DR02_PRO`
 
-## 评估（需要 Isaac Sim）
+## 6. 评估（需要 Isaac Sim）
 
 ```bash
 python scripts/rsl_rl/play.py \
@@ -192,9 +188,9 @@ python scripts/rsl_rl/play.py \
 
 同时会自动将 ONNX 导出到检查点旁边的 `exported/` 子目录。
 
-## ONNX 导出
+## 7. ONNX 导出
 
-### 快速导出（无需 Isaac Sim）
+### 7.1. 快速导出（无需 Isaac Sim）
 
 ```bash
 python scripts/rsl_rl/export_onnx_fast.py \
@@ -204,7 +200,7 @@ python scripts/rsl_rl/export_onnx_fast.py \
 
 从检查点推断网络结构。嵌入硬编码的 DR02_pro 元数据（关节名称、刚度/阻尼、动作缩放）。
 
-### 导出动作 json + 策略 onnx（交互式）
+### 7.2. 导出动作 json + 策略 onnx（交互式）
 
 ```bash
 python scripts/export_motion_and_policy.py
@@ -212,7 +208,7 @@ python scripts/export_motion_and_policy.py
 
 扫描 `logs/rsl_rl/` 下的训练运行目录，通过 `npz_to_json.py` 将 `params/env.yaml` 中的动作文件转换为 JSON，并通过 `export_onnx_fast.py` 将选中的 `model_*.pt` 检查点导出为 ONNX。
 
-## 工具
+## 8. 工具
 
 ```bash
 # 对比两次训练运行的配置
@@ -226,7 +222,7 @@ python scripts/auto_info_yaml.py \
   --output_dir dataset/DR02_pro_multi_motion
 ```
 
-## 快速参考
+## 9. 快速参考
 
 | 任务 | 脚本 |
 |---|---|
@@ -243,10 +239,10 @@ python scripts/auto_info_yaml.py \
 | 评估策略 | `scripts/rsl_rl/play.py` |
 | 快速导出 ONNX | `scripts/rsl_rl/export_onnx_fast.py` |
 
-## 动作数据
+## 10. 动作数据
 
 训练就绪的 FK `.npz` 文件位于 `dataset/gmr/`（例如 `jugong.npz`、`huishou.npz`、`daquan.npz`）。
 
-## 许可证
+## 11. 许可证
 
 BSD 3-Clause — 详见 [LICENSE](LICENSE)。

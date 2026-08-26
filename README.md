@@ -2,13 +2,9 @@
 
 Humanoid motion tracking training on Isaac Lab. Trains PPO policies that track reference motions (DeepMimic-style reward). Primary robot: **DR02_pro**.
 
-## Installation
+## 1. Installation
 
-1. Install [Isaac Lab v2.3.2](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html) (conda recommended)
-
-2. **PyTorch 2.7.0, CUDA 12.8** — other versions will degrade simulation speed
-
-3. **rsl-rl-lib 5.0.1** — `pip install rsl-rl-lib==5.0.1`
+- Install dependencies (Isaac Lab v2.3.2 + PyTorch 2.7.0 + rsl-rl-lib 5.0.1)
 
 ```bash
 conda create -n mimic python=3.11
@@ -31,7 +27,7 @@ pip install rsl-rl-lib==5.0.1
 pip list | grep -E "torch|isaac|rsl|stable"
 ```
 
-4. Clone and install:
+- Clone and install:
 
 ```bash
 git clone https://github.com/DeepRoboticsLab/deep-robotics-mimic.git
@@ -39,16 +35,15 @@ cd deep-robotics-mimic
 python -m pip install -e source/whole_body_tracking
 ```
 
-## Data Pipeline
+## 2. Data Pipeline
 
 Raw pipeline: BVH/SMPLX → `.pkl` (retargeting) → `.npz` → FK `.npz` → Training → `.json` (deployment)
 
-### BVH/SMPLX → pkl -> npz(retargeting)
+### 2.1. BVH/SMPLX → pkl → npz (retargeting)
 
 Retargeting is done by the companion project `deep-robotics-retarget`. Its outputs are robot joint `.pkl` files.
 
-
-### npz → FK npz (forward kinematics, requires Isaac Sim)
+### 2.2. npz → FK npz (forward kinematics, requires Isaac Sim)
 
 **Single file:**
 ```bash
@@ -74,20 +69,20 @@ python scripts/batch_convert_DR02_pro.py \
 
 Supported `--retarget_format`: `deep_retarget`, `omniretarget`, `gmr`
 
-### npz → json (for deployment controller)
+### 2.3. npz → json (for deployment controller)
 
 ```bash
 python scripts/npz_to_json.py --input <file>.npz --output <file>.json
 ```
 
-## Visualization (requires Isaac Sim)
+## 3. Visualization (Isaac Sim, requires Isaac Sim)
 
 ```bash
 python scripts/replay_merged.py --folder dataset/gmr/   # folder of FK npz files
 python scripts/replay_merged.py --file <file>.npz --fk_file <fk_file>.npz  # legacy single-file mode
 ```
 
-## Visualization (MuJoCo, no Isaac Sim required)
+## 4. Visualization (MuJoCo, no Isaac Sim required)
 
 ```bash
 pip install mujoco
@@ -97,9 +92,9 @@ python scripts/replay_npz_mujoco.py dataset/gmr/<motion>.npz
 python scripts/replay_npz_mujoco.py dataset/gmr/<motion>.npz --verify   # FK accuracy verification
 ```
 
-## Training (requires Isaac Sim)
+## 5. Training (requires Isaac Sim)
 
-### Single GPU
+### 5.1. Single GPU
 
 ```bash
 python scripts/rsl_rl/train.py \
@@ -113,7 +108,7 @@ python scripts/rsl_rl/train.py \
   --max_iterations 100000
 ```
 
-### Multi-GPU
+### 5.2. Multi-GPU
 
 ```bash
 python -m torch.distributed.run --nnodes=1 --nproc_per_node=2 \
@@ -129,7 +124,7 @@ python -m torch.distributed.run --nnodes=1 --nproc_per_node=2 \
   --max_iterations 200000
 ```
 
-### Resume from checkpoint
+### 5.3. Resume from checkpoint
 
 ```bash
 python scripts/rsl_rl/train.py \
@@ -148,7 +143,7 @@ python scripts/rsl_rl/train.py \
 
 `--checkpoint` is just the filename. `--load_run` is the folder name under `logs/rsl_rl/{experiment_name}/`.
 
-### Auto-restart on NaN (recommended for long runs)
+### 5.4. Auto-restart on NaN (recommended for long runs)
 
 Wraps `train.py` in a subprocess. On NaN loss, automatically restarts from a checkpoint ~1000 iterations earlier. Up to 10 retries.
 
@@ -177,11 +172,11 @@ python scripts/rsl_rl/train_auto_restart.py \
   --max_iterations 200000
 ```
 
-### Available tasks
+### 5.5. Available tasks
 
 `Tracking-Flat-DR02_PRO`
 
-## Evaluation (requires Isaac Sim)
+## 6. Evaluation (requires Isaac Sim)
 
 ```bash
 python scripts/rsl_rl/play.py \
@@ -193,9 +188,9 @@ python scripts/rsl_rl/play.py \
 
 Also auto-exports ONNX to an `exported/` subdirectory next to the checkpoint.
 
-## ONNX Export
+## 7. ONNX Export
 
-### Fast export (no Isaac Sim)
+### 7.1. Fast export (no Isaac Sim)
 
 ```bash
 python scripts/rsl_rl/export_onnx_fast.py \
@@ -205,7 +200,7 @@ python scripts/rsl_rl/export_onnx_fast.py \
 
 Infers network shape from checkpoint. Embeds hardcoded DR02_pro metadata (joint names, stiffness/damping, action scale).
 
-### Export motion json + policy onnx (interactive)
+### 7.2. Export motion json + policy onnx (interactive)
 
 ```bash
 python scripts/export_motion_and_policy.py
@@ -213,7 +208,7 @@ python scripts/export_motion_and_policy.py
 
 Scans training runs under `logs/rsl_rl/`, converts the motion file from `params/env.yaml` to JSON via `npz_to_json.py`, and exports the selected `model_*.pt` checkpoint to ONNX via `export_onnx_fast.py`.
 
-## Utilities
+## 8. Utilities
 
 ```bash
 # Compare configs between two training runs
@@ -227,7 +222,7 @@ python scripts/auto_info_yaml.py \
   --output_dir dataset/DR02_pro_multi_motion
 ```
 
-## Quick Reference
+## 9. Quick Reference
 
 | Task | Script |
 |---|---|
@@ -244,10 +239,10 @@ python scripts/auto_info_yaml.py \
 | Evaluate policy | `scripts/rsl_rl/play.py` |
 | Export ONNX (fast) | `scripts/rsl_rl/export_onnx_fast.py` |
 
-## Motion Data
+## 10. Motion Data
 
 Training-ready FK `.npz` files are under `dataset/gmr/` (e.g. `jugong.npz`, `huishou.npz`, `daquan.npz`).
 
-## License
+## 11. License
 
 BSD 3-Clause — See [LICENSE](LICENSE) for details.

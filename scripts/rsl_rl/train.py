@@ -10,8 +10,9 @@ with automatic NaN recovery.
 
 Example:
     python scripts/rsl_rl/train.py --task=Tracking-Flat-DR02_PRO \
+        --registry_name dataset/gmr/jugong.npz \
         --logger tensorboard --log_project_name logs/ \
-        --run_name motion_name --headless --max_iterations=200000
+        --run_name jugong --headless --device cuda:0 --max_iterations 100000
 """
 
 """Launch Isaac Sim Simulator first."""

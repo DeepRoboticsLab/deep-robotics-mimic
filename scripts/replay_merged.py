@@ -4,13 +4,11 @@ Left side:  DR02_pro robot driven by joint angles — Isaac Sim computes FK on t
 Right side: Colored sphere markers at precomputed FK body positions (no robot mesh).
 
 Usage (folder of motions):
-    python scripts/replay_merged.py \
-        --folder datasets/DR02_pro_multi_motion/DR02_pro/train
+    python scripts/replay_merged.py --folder dataset/gmr/ --headless
 
 Legacy usage (single file, old format):
     python scripts/replay_merged.py \
-        --file /path/to/merged.npz \
-        --fk_file /path/to/merged_fk.npz
+        --file <file>.npz --fk_file <fk_file>.npz --headless
 """
 
 """Launch Isaac Sim Simulator first."""

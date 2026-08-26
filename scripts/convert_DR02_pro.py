@@ -14,9 +14,10 @@ For the source NPZ:
 
 Usage:
     python scripts/convert_DR02_pro.py \
-        --input /path/to/motion.npz \
-        --output /path/to/motion_fk.npz \
-        --num_envs 10000 --output_fps 50 --headless
+        --input dataset/gmr/jugong.npz \
+        --output dataset/gmr/jugong_fk.npz \
+        --num_envs 10000 --output_fps 50 \
+        --retarget_format gmr --headless
 """
 
 from __future__ import annotations

@@ -14,7 +14,9 @@ NPZ data format (keys):
     - body_ang_vel_w: (N, 40, 3) angular velocities
 
 Usage:
-    python scripts/replay_npz_mujoco.py [npz_file_path]
+    python scripts/replay_npz_mujoco.py dataset/gmr/jugong.npz
+    python scripts/replay_npz_mujoco.py dataset/gmr/jugong.npz --speed 0.5 --no-loop
+    python scripts/replay_npz_mujoco.py dataset/gmr/jugong.npz --verify   # FK accuracy verification
 
     Without arguments, enters interactive file selection (with Tab completion).
 """
