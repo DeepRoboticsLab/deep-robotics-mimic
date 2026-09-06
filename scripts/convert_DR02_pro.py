@@ -1,11 +1,15 @@
-"""Convert a single motion NPZ file to training-ready FK format.
+"""Convert a single motion PKL/NPZ file to training-ready FK format.
 
-Supports two source formats:
-  - deep_retarget: root_trans_offset, root_rot (xyzw), dof (from motion_capture_data_process)
-  - omniretarget:  qpos = [root_pos(3), root_quat_wxyz(4), joint_dof(29)]
+Input format is picked up by extension:
+  - .pkl (gmr retargeting output, only with --retarget_format gmr):
+      fps, root_pos (N,3), root_rot (N,4) xyzw, dof_pos (N,29)
+  - .npz, interpreted according to --retarget_format:
+      deep_retarget: root_trans_offset, root_rot (xyzw), dof (from motion_capture_data_process)
+      omniretarget:  qpos = [root_pos(3), root_quat_wxyz(4), joint_dof(29)]
+      gmr:           root_pos, root_rot (wxyz), dof_pos
 
-For the source NPZ:
-  1. Read generalized coordinates at source fps (typically 30).
+For the source file:
+  1. Read generalized coordinates at source fps.
   2. Interpolate to 50 fps using lerp (positions/dofs) and slerp (quaternions).
   3. Compute velocities at the new dt.
   4. Run batched FK through Isaac Sim with --num_envs parallel robots.
@@ -14,8 +18,15 @@ For the source NPZ:
 
 Usage:
     python scripts/convert_DR02_pro.py \
-        --input dataset/gmr/jugong.npz \
-        --output dataset/gmr/jugong_fk.npz \
+        --input dataset/raw/pkl/jugong.pkl \
+        --output dataset/gmr/jugong.npz \
+        --num_envs 10000 --output_fps 50 \
+        --retarget_format gmr --headless
+
+    or:
+    python scripts/convert_DR02_pro.py \
+        --input dataset/raw/npz/jugong.npz \
+        --output dataset/gmr/jugong.npz \
         --num_envs 10000 --output_fps 50 \
         --retarget_format gmr --headless
 """
@@ -24,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import pickle
 import sys
 import time
 
@@ -32,18 +44,25 @@ import torch
 
 from isaaclab.app import AppLauncher
 
-parser = argparse.ArgumentParser(description="Single-file FK precompute for CR1 motions.")
-parser.add_argument("--input", type=str, required=True, help="Path to source NPZ file.")
+parser = argparse.ArgumentParser(description="Single-file FK precompute for DR02_PRO motions.")
+parser.add_argument("--input", type=str, required=True, help="Path to source PKL or NPZ file.")
 parser.add_argument("--output", type=str, required=True, help="Path for training-ready NPZ output.")
 parser.add_argument("--num_envs", type=int, default=10000, help="Parallel environments for batched FK.")
 parser.add_argument("--output_fps", type=int, default=50, help="Target FPS for output motions.")
 parser.add_argument(
     "--retarget_format", type=str, default="gmr",
     choices=["deep_retarget", "omniretarget", "gmr"],
-    help="Source NPZ format: 'deep_retarget' (root_trans_offset/root_rot/dof) or 'omniretarget' (qpos)."
+    help="Source NPZ format: 'deep_retarget' (root_trans_offset/root_rot/dof), "
+    "'omniretarget' (qpos), or 'gmr' (root_pos/root_rot/dof_pos; also accepts .pkl inputs)."
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+
+# Fail fast: .pkl input is only supported with the gmr retarget format (before Isaac Sim launch)
+if args_cli.input.endswith(".pkl") and args_cli.retarget_format != "gmr":
+    parser.error(
+        f"PKL input is only supported with --retarget_format gmr, got '{args_cli.retarget_format}'."
+    )
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
@@ -95,6 +114,29 @@ class FKSceneCfg(InteractiveSceneCfg):
         ),
     )
     robot: ArticulationCfg = DR02_PRO_CYLINDER_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+
+# ---------------------------------------------------------------------------
+# Pickle loading (numpy 2.x -> 1.x compat)
+# ---------------------------------------------------------------------------
+
+def load_pkl_compat(path: str):
+    """Load a pickle that may have been written with numpy>=2.0.
+
+    NumPy 2 renamed ``numpy.core`` to ``numpy._core``, so pickles written
+    under numpy 2 fail with ``ModuleNotFoundError: No module named
+    'numpy._core'`` on numpy 1.x.  Alias the module paths before
+    unpickling; the array pickle payload itself is format-compatible.
+    """
+    import numpy.core
+
+    if "numpy._core" not in sys.modules:
+        sys.modules["numpy._core"] = numpy.core
+        sys.modules["numpy._core.multiarray"] = numpy.core.multiarray
+        sys.modules["numpy._core.umath"] = numpy.core.umath
+
+    with open(path, "rb") as f:
+        return pickle.load(f)
 
 
 # ---------------------------------------------------------------------------
@@ -163,40 +205,49 @@ def run_fk_for_file(
     output_path: str,
     output_fps: int,
 ):
-    """Process one source NPZ -> training-ready NPZ via batched FK."""
+    """Process one source PKL/NPZ file -> training-ready NPZ via batched FK."""
     robot = scene["robot"]
     device = sim.device
     num_envs = scene.cfg.num_envs
 
     t_start = time.time()
 
-    # Load source generalized coordinates
-    src = np.load(input_path, allow_pickle=True)
-    input_fps = int(float(src["fps"].flat[0]))
-    retarget_format = args_cli.retarget_format
-
-    if retarget_format == "omniretarget":
-        # OmniRetarget: qpos = [root_pos(3), root_quat_wxyz(4), joint_dof(29)]
-        qpos = torch.tensor(np.array(src["qpos"], dtype=np.float64).astype(np.float32), device=device)
-        root_trans = qpos[:, :3]
-        base_rotations = qpos[:, 3:7]          # already wxyz (MuJoCo convention)
-        omni_dof = qpos[:, 7:]                 # 29 joints in omniretarget order
-        dof_positions = omni_dof
-
-    elif retarget_format == "deep_retarget":
-        # Deep Retarget: separate keys, root_rot in xyzw
-        root_trans = torch.tensor(src["root_trans_offset"], dtype=torch.float32, device=device)
-        root_rot_xyzw = torch.tensor(
-            np.array(src["root_rot"], dtype=np.float64).astype(np.float32), device=device
-        )
-        dof_positions = torch.tensor(src["dof"], dtype=torch.float32, device=device)
+    # Load source generalized coordinates (PKL is gmr retargeting output)
+    if input_path.endswith(".pkl"):
+        # PKL: fps, root_pos (N,3), root_rot (N,4) xyzw, dof_pos (N,29)
+        src = load_pkl_compat(input_path)
+        input_fps = int(src["fps"])
+        root_trans = torch.tensor(np.asarray(src["root_pos"], dtype=np.float64).astype(np.float32), device=device)
+        root_rot_xyzw = torch.tensor(np.asarray(src["root_rot"], dtype=np.float64).astype(np.float32), device=device)
+        dof_positions = torch.tensor(np.asarray(src["dof_pos"], dtype=np.float64).astype(np.float32), device=device)
         # xyzw -> wxyz
         base_rotations = root_rot_xyzw[:, [3, 0, 1, 2]]
-    elif retarget_format == "gmr":
-        # GMR format: root_pos(3), root_rot(4, wxyz), dof_pos(29)
-        root_trans = torch.tensor(np.array(src["root_pos"], dtype=np.float64).astype(np.float32), device=device)
-        base_rotations = torch.tensor(np.array(src["root_rot"], dtype=np.float64).astype(np.float32), device=device)  # wxyz
-        dof_positions = torch.tensor(np.array(src["dof_pos"], dtype=np.float64).astype(np.float32), device=device)
+    else:
+        src = np.load(input_path, allow_pickle=True)
+        input_fps = int(float(src["fps"].flat[0]))
+        retarget_format = args_cli.retarget_format
+
+        if retarget_format == "omniretarget":
+            # OmniRetarget: qpos = [root_pos(3), root_quat_wxyz(4), joint_dof(29)]
+            qpos = torch.tensor(np.array(src["qpos"], dtype=np.float64).astype(np.float32), device=device)
+            root_trans = qpos[:, :3]
+            base_rotations = qpos[:, 3:7]          # already wxyz (MuJoCo convention)
+            dof_positions = qpos[:, 7:]            # already in joint order, no remap needed
+
+        elif retarget_format == "deep_retarget":
+            # Deep Retarget: separate keys, root_rot in xyzw
+            root_trans = torch.tensor(src["root_trans_offset"], dtype=torch.float32, device=device)
+            root_rot_xyzw = torch.tensor(
+                np.array(src["root_rot"], dtype=np.float64).astype(np.float32), device=device
+            )
+            dof_positions = torch.tensor(src["dof"], dtype=torch.float32, device=device)
+            # xyzw -> wxyz
+            base_rotations = root_rot_xyzw[:, [3, 0, 1, 2]]
+        elif retarget_format == "gmr":
+            # GMR format: root_pos(3), root_rot(4, wxyz), dof_pos(29)
+            root_trans = torch.tensor(np.array(src["root_pos"], dtype=np.float64).astype(np.float32), device=device)
+            base_rotations = torch.tensor(np.array(src["root_rot"], dtype=np.float64).astype(np.float32), device=device)  # wxyz
+            dof_positions = torch.tensor(np.array(src["dof_pos"], dtype=np.float64).astype(np.float32), device=device)
 
     # --- Interpolate to output fps ---
     root_trans, base_rotations, dof_positions, num_frames = interpolate_motion(
@@ -269,6 +320,8 @@ def run_fk_for_file(
         body_quat_w=all_body_quat_w.numpy(),
         body_lin_vel_w=all_body_lin_vel_w.numpy(),
         body_ang_vel_w=all_body_ang_vel_w.numpy(),
+        joint_names=np.array(robot.joint_names),
+        body_names=np.array(robot.body_names),
     )
 
     elapsed = time.time() - t_start
@@ -289,14 +342,19 @@ def main():
     print(f"[INFO] Processing single file: {os.path.basename(input_path)}")
 
     # Determine frame count for scene sizing
-    src = np.load(input_path, allow_pickle=True)
-    input_fps_val = int(float(src["fps"].flat[0]))
-    if "num_frames" in src:
-        n = int(src["num_frames"].flat[0])
-    elif "qpos" in src:
-        n = src["qpos"].shape[0]
+    if input_path.endswith(".pkl"):
+        src = load_pkl_compat(input_path)
+        input_fps_val = int(src["fps"])
+        n = int(np.asarray(src["root_pos"]).shape[0])
     else:
-        n = src[list(src.keys())[0]].shape[0]
+        src = np.load(input_path, allow_pickle=True)
+        input_fps_val = int(float(src["fps"].flat[0]))
+        if "num_frames" in src:
+            n = int(src["num_frames"].flat[0])
+        elif "qpos" in src:
+            n = src["qpos"].shape[0]
+        else:
+            n = src[list(src.keys())[0]].shape[0]
     if input_fps_val != output_fps:
         duration = (n - 1) / input_fps_val
         n = int(duration * output_fps)

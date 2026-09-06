@@ -1,10 +1,14 @@
-"""Batch-convert motion NPZ files to training-ready FK format.
+"""Batch-convert motion PKL/NPZ files to training-ready FK format.
 
-Supports two source formats:
-  - deep_retarget: root_trans_offset, root_rot (xyzw), dof (from motion_capture_data_process)
-  - omniretarget:  qpos = [root_pos(3), root_quat_wxyz(4), joint_dof(29)]
+Input files are picked up by extension:
+  - .pkl (gmr retargeting output, only with --retarget_format gmr):
+      fps, root_pos (N,3), root_rot (N,4) xyzw, dof_pos (N,29)
+  - .npz, interpreted according to --retarget_format:
+      deep_retarget: root_trans_offset, root_rot (xyzw), dof (from motion_capture_data_process)
+      omniretarget:  qpos = [root_pos(3), root_quat_wxyz(4), joint_dof(29)]
+      gmr:           root_pos, root_rot (wxyz), dof_pos
 
-For each source NPZ in the input directory:
+For each source file in the input directory:
   1. Read generalized coordinates at source fps (typically 30).
   2. Interpolate to 50 fps using lerp (positions/dofs) and slerp (quaternions).
   3. Compute velocities at the new dt.
@@ -14,7 +18,7 @@ For each source NPZ in the input directory:
 
 Usage:
     python scripts/batch_convert_DR02_pro.py \
-        --input_dir /path/to/source_npz_folder \
+        --input_dir /path/to/source_folder \
         --output_dir dataset/ \
         --num_envs 10000 --output_fps 50 \
         --retarget_format gmr --headless
@@ -25,6 +29,7 @@ from __future__ import annotations
 import argparse
 import glob
 import os
+import pickle
 import sys
 import time
 
@@ -34,18 +39,26 @@ import torch
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Batch FK precompute for DR02_PRO motions.")
-parser.add_argument("--input_dir", type=str, required=True, help="Directory containing source NPZ files.")
+parser.add_argument("--input_dir", type=str, required=True, help="Directory containing source PKL/NPZ files.")
 parser.add_argument("--output_dir", type=str, required=True, help="Directory for training-ready NPZ output.")
 parser.add_argument("--num_envs", type=int, default=10000, help="Parallel environments for batched FK.")
 parser.add_argument("--output_fps", type=int, default=50, help="Target FPS for output motions.")
 parser.add_argument(
     "--retarget_format", type=str, default="gmr",
     choices=["deep_retarget", "omniretarget", "gmr"],
-    help="Source NPZ format: 'deep_retarget' (root_trans_offset/root_rot/dof) or 'omniretarget' (qpos)."
+    help="Source NPZ format: 'deep_retarget' (root_trans_offset/root_rot/dof), "
+    "'omniretarget' (qpos), or 'gmr' (root_pos/root_rot/dof_pos; also accepts .pkl inputs)."
 )
 parser.add_argument("--override", action="store_true", default=False, help="Overwrite existing output files without asking.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+
+# Fail fast: .pkl inputs are only supported with the gmr retarget format (before Isaac Sim launch)
+if args_cli.retarget_format != "gmr" and glob.glob(os.path.join(args_cli.input_dir, "*.pkl")):
+    parser.error(
+        f"Found .pkl files in --input_dir but --retarget_format is '{args_cli.retarget_format}'. "
+        "PKL inputs are only supported with --retarget_format gmr."
+    )
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
@@ -67,21 +80,23 @@ from isaaclab.utils.math import (
 
 from whole_body_tracking.robots.DR02_pro import DR02_PRO_CYLINDER_CFG
 
+# Robot model joint order (matches MuJoCo XML & URDF traversal, same as the source data)
 DR02_PRO_JOINT_NAMES = [
-    "left_hip_y_joint", "left_hip_x_joint", "left_hip_z_joint",
-    "left_knee_joint", "left_ankle_y_joint", "left_ankle_x_joint",
-    "right_hip_y_joint", "right_hip_x_joint", "right_hip_z_joint",
-    "right_knee_joint", "right_ankle_y_joint", "right_ankle_x_joint",
+    # waist
     "waist_z_joint", "waist_x_joint", "waist_y_joint",
+    # arms
     "left_shoulder_y_joint", "left_shoulder_x_joint", "left_shoulder_z_joint",
     "left_elbow_joint",
     "left_wrist_z_joint", "left_wrist_y_joint", "left_wrist_x_joint",
     "right_shoulder_y_joint", "right_shoulder_x_joint", "right_shoulder_z_joint",
     "right_elbow_joint",
-    "right_wrist_z_joint", "right_wrist_y_joint", "right_wrist_x_joint"
+    "right_wrist_z_joint", "right_wrist_y_joint", "right_wrist_x_joint",
+    # legs
+    "left_hip_y_joint", "left_hip_x_joint", "left_hip_z_joint",
+    "left_knee_joint", "left_ankle_y_joint", "left_ankle_x_joint",
+    "right_hip_y_joint", "right_hip_x_joint", "right_hip_z_joint",
+    "right_knee_joint", "right_ankle_y_joint", "right_ankle_x_joint",
 ]
-
-OMNI_TO_DEEP = [ 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
 
 @configclass
@@ -95,6 +110,29 @@ class FKSceneCfg(InteractiveSceneCfg):
         ),
     )
     robot: ArticulationCfg = DR02_PRO_CYLINDER_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+
+# ---------------------------------------------------------------------------
+# Pickle loading (numpy 2.x -> 1.x compat)
+# ---------------------------------------------------------------------------
+
+def load_pkl_compat(path: str):
+    """Load a pickle that may have been written with numpy>=2.0.
+
+    NumPy 2 renamed ``numpy.core`` to ``numpy._core``, so pickles written
+    under numpy 2 fail with ``ModuleNotFoundError: No module named
+    'numpy._core'`` on numpy 1.x.  Alias the module paths before
+    unpickling; the array pickle payload itself is format-compatible.
+    """
+    import numpy.core
+
+    if "numpy._core" not in sys.modules:
+        sys.modules["numpy._core"] = numpy.core
+        sys.modules["numpy._core.multiarray"] = numpy.core.multiarray
+        sys.modules["numpy._core.umath"] = numpy.core.umath
+
+    with open(path, "rb") as f:
+        return pickle.load(f)
 
 
 # ---------------------------------------------------------------------------
@@ -163,42 +201,48 @@ def run_fk_for_file(
     output_path: str,
     output_fps: int,
 ):
-    """Process one source NPZ -> training-ready NPZ via batched FK."""
+    """Process one source PKL/NPZ file -> training-ready NPZ via batched FK."""
     robot = scene["robot"]
     device = sim.device
     num_envs = scene.cfg.num_envs
 
     t_start = time.time()
 
-    # Load source generalized coordinates
-    src = np.load(input_path, allow_pickle=True)
-    input_fps = int(float(src["fps"].flat[0]))
-    retarget_format = args_cli.retarget_format
-
-    if retarget_format == "omniretarget":
-        # OmniRetarget: qpos = [root_pos(3), root_quat_wxyz(4), joint_dof(29)]
-        qpos = torch.tensor(np.array(src["qpos"], dtype=np.float64).astype(np.float32), device=device)
-        root_trans = qpos[:, :3]
-        base_rotations = qpos[:, 3:7]          # already wxyz (MuJoCo convention)
-        omni_dof = qpos[:, 7:]                 # 29 joints in omniretarget order
-        # Remap from omniretarget order (legs-waist-arms) to DR02_PRO_JOINT_NAMES order (legs-waist-arms)
-        dof_positions = omni_dof[:, OMNI_TO_DEEP]
-    elif retarget_format == "deep_retarget":
-        # Deep Retarget: separate keys, root_rot in xyzw
-        root_trans = torch.tensor(src["root_trans_offset"], dtype=torch.float32, device=device)
-        root_rot_xyzw = torch.tensor(
-            np.array(src["root_rot"], dtype=np.float64).astype(np.float32), device=device
-        )
-        dof_positions = torch.tensor(src["dof"], dtype=torch.float32, device=device)
+    # Load source generalized coordinates (PKL is gmr retargeting output)
+    if input_path.endswith(".pkl"):
+        # PKL: fps, root_pos (N,3), root_rot (N,4) xyzw, dof_pos (N,29)
+        src = load_pkl_compat(input_path)
+        input_fps = int(src["fps"])
+        root_trans = torch.tensor(np.asarray(src["root_pos"], dtype=np.float64).astype(np.float32), device=device)
+        root_rot_xyzw = torch.tensor(np.asarray(src["root_rot"], dtype=np.float64).astype(np.float32), device=device)
+        dof_positions = torch.tensor(np.asarray(src["dof_pos"], dtype=np.float64).astype(np.float32), device=device)
         # xyzw -> wxyz
         base_rotations = root_rot_xyzw[:, [3, 0, 1, 2]]
-    elif retarget_format == "gmr":
-        # GMR format: root_pos(3), root_rot(4, wxyz), dof_pos(21)
-        root_trans = torch.tensor(np.array(src["root_pos"], dtype=np.float64).astype(np.float32), device=device)
-        base_rotations = torch.tensor(np.array(src["root_rot"], dtype=np.float64).astype(np.float32), device=device)  # wxyz
-        gmr_dof = torch.tensor(np.array(src["dof_pos"], dtype=np.float64).astype(np.float32), device=device)
-        # Remap from gmr order to DR02_PRO_JOINT_NAMES order (legs-waist-arms)
-        dof_positions = gmr_dof[:, OMNI_TO_DEEP]
+    else:
+        src = np.load(input_path, allow_pickle=True)
+        input_fps = int(float(src["fps"].flat[0]))
+        retarget_format = args_cli.retarget_format
+
+        if retarget_format == "omniretarget":
+            # OmniRetarget: qpos = [root_pos(3), root_quat_wxyz(4), joint_dof(29)]
+            qpos = torch.tensor(np.array(src["qpos"], dtype=np.float64).astype(np.float32), device=device)
+            root_trans = qpos[:, :3]
+            base_rotations = qpos[:, 3:7]          # already wxyz (MuJoCo convention)
+            dof_positions = qpos[:, 7:]            # already in joint order, no remap needed
+        elif retarget_format == "deep_retarget":
+            # Deep Retarget: separate keys, root_rot in xyzw
+            root_trans = torch.tensor(src["root_trans_offset"], dtype=torch.float32, device=device)
+            root_rot_xyzw = torch.tensor(
+                np.array(src["root_rot"], dtype=np.float64).astype(np.float32), device=device
+            )
+            dof_positions = torch.tensor(src["dof"], dtype=torch.float32, device=device)
+            # xyzw -> wxyz
+            base_rotations = root_rot_xyzw[:, [3, 0, 1, 2]]
+        elif retarget_format == "gmr":
+            # GMR format: root_pos(3), root_rot(4, wxyz), dof_pos(29)
+            root_trans = torch.tensor(np.array(src["root_pos"], dtype=np.float64).astype(np.float32), device=device)
+            base_rotations = torch.tensor(np.array(src["root_rot"], dtype=np.float64).astype(np.float32), device=device)  # wxyz
+            dof_positions = torch.tensor(np.array(src["dof_pos"], dtype=np.float64).astype(np.float32), device=device)
     
     # Interpolate to output fps
     root_trans, base_rotations, dof_positions, num_frames = interpolate_motion(
@@ -282,20 +326,32 @@ def main():
     output_dir = os.path.join(os.path.abspath(args_cli.output_dir), args_cli.retarget_format)
     output_fps = args_cli.output_fps
 
-    npz_files = sorted(glob.glob(os.path.join(input_dir, "*.npz")))
-    print(f"[INFO] Found {len(npz_files)} NPZ files in {input_dir}")
+    input_files = sorted(
+        glob.glob(os.path.join(input_dir, "*.npz")) + glob.glob(os.path.join(input_dir, "*.pkl"))
+    )
+    num_pkl = sum(1 for f in input_files if f.endswith(".pkl"))
+
+    if num_pkl and num_pkl < len(input_files):
+        print("[WARN] Mixed .pkl and .npz inputs detected; each file is loaded by its extension.")
+
+    print(f"[INFO] Found {len(input_files)} files ({num_pkl} pkl, {len(input_files) - num_pkl} npz) in {input_dir}")
 
     # Determine max frames across all files (for scene sizing)
     max_frames = 0
-    for f in npz_files:
-        src = np.load(f, allow_pickle=True)
-        input_fps_val = int(float(src["fps"].flat[0]))
-        if "num_frames" in src:
-            n = int(src["num_frames"].flat[0])
-        elif "qpos" in src:
-            n = src["qpos"].shape[0]
+    for f in input_files:
+        if f.endswith(".pkl"):
+            src = load_pkl_compat(f)
+            input_fps_val = int(src["fps"])
+            n = int(np.asarray(src["root_pos"]).shape[0])
         else:
-            n = src[list(src.keys())[0]].shape[0]
+            src = np.load(f, allow_pickle=True)
+            input_fps_val = int(float(src["fps"].flat[0]))
+            if "num_frames" in src:
+                n = int(src["num_frames"].flat[0])
+            elif "qpos" in src:
+                n = src["qpos"].shape[0]
+            else:
+                n = src[list(src.keys())[0]].shape[0]
         if input_fps_val != output_fps:
             duration = (n - 1) / input_fps_val
             n = int(duration * output_fps)
@@ -314,9 +370,10 @@ def main():
 
     total_start = time.time()
     skipped = 0
-    for i, npz_file in enumerate(npz_files):
-        basename = os.path.basename(npz_file)
-        output_path = os.path.join(output_dir, basename)
+    for i, input_file in enumerate(input_files):
+        basename = os.path.basename(input_file)
+        output_name = os.path.splitext(basename)[0] + ".npz"
+        output_path = os.path.join(output_dir, output_name)
 
         # If output file already exists, ask whether to overwrite
         if os.path.exists(output_path):
@@ -324,19 +381,19 @@ def main():
                 with np.load(output_path) as d:
                     if "joint_pos" in d.files:
                         if not args_cli.override:
-                            response = input(f"  [{i+1}/{len(npz_files)}] File exists: {basename}\n  Overwrite? [y/N]: ").strip().lower()
+                            response = input(f"  [{i+1}/{len(input_files)}] File exists: {output_name}\n  Overwrite? [y/N]: ").strip().lower()
                             if response not in ("y", "yes"):
-                                print(f"  [{i+1}/{len(npz_files)}] SKIP: {basename}")
+                                print(f"  [{i+1}/{len(input_files)}] SKIP: {basename}")
                                 skipped += 1
                                 continue
             except Exception:
                 pass
 
-        print(f"  [{i+1}/{len(npz_files)}] Processing: {basename}")
-        run_fk_for_file(sim, scene, npz_file, output_path, output_fps)
+        print(f"  [{i+1}/{len(input_files)}] Processing: {basename}")
+        run_fk_for_file(sim, scene, input_file, output_path, output_fps)
 
     total_elapsed = time.time() - total_start
-    print(f"\n[DONE] Processed {len(npz_files) - skipped}/{len(npz_files)} files in {total_elapsed:.1f}s")
+    print(f"\n[DONE] Processed {len(input_files) - skipped}/{len(input_files)} files in {total_elapsed:.1f}s")
     sys.exit(0)
 
 

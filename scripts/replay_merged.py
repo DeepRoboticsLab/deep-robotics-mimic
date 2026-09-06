@@ -6,9 +6,8 @@ Right side: Colored sphere markers at precomputed FK body positions (no robot me
 Usage (folder of motions):
     python scripts/replay_merged.py --folder dataset/gmr/ --headless
 
-Legacy usage (single file, old format):
-    python scripts/replay_merged.py \
-        --file <file>.npz --fk_file <fk_file>.npz --headless
+Usage (single file):
+    python scripts/replay_merged.py --file dataset/gmr/boxing.npz --headless
 """
 
 """Launch Isaac Sim Simulator first."""
@@ -25,13 +24,7 @@ from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Replay npz motions (dual view).")
 parser.add_argument("--folder", type=str, default=None, help="Path to folder of precomputed FK .npz files.")
-parser.add_argument("--file", type=str, default=None, help="(Legacy) Path to merged .npz (joint angles).")
-parser.add_argument("--fk_file", type=str, default=None, help="(Legacy) Path to merged_fk.npz (precomputed FK).")
-parser.add_argument(
-    "--retarget_format", type=str, default="deep_retarget",
-    choices=["deep_retarget", "omniretarget"],
-    help="Source NPZ format for --file mode: 'deep_retarget' or 'omniretarget'."
-)
+parser.add_argument("--file", type=str, default=None, help="Path to a single precomputed FK .npz file.")
 
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -117,10 +110,6 @@ DR02_PRO_JOINT_NAMES = [
     "right_elbow_joint", "right_wrist_z_joint", "right_wrist_y_joint", "right_wrist_x_joint",
 ]
 
-# OmniRetarget DR02_pro.xml uses waist-arms-legs order; DR02_PRO_JOINT_NAMES uses legs-waist-arms.
-# Maps omni qpos[7+i] -> DR02_PRO_JOINT_NAMES[OMNI_TO_DEEP[i]].
-OMNI_TO_DEEP = [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-
 # Root body index in the body arrays
 ROOT_BODY_IDX = 0
 
@@ -129,7 +118,7 @@ FK_X_OFFSET = 3.0
 
 
 class FkNpzMotion:
-    """Loads a single precomputed FK .npz file (new format from batch_convert.py).
+    """Loads a single precomputed FK .npz file.
 
     Keys: fps, joint_pos, joint_vel, body_pos_w, body_quat_w, body_lin_vel_w, body_ang_vel_w
     """
@@ -137,7 +126,7 @@ class FkNpzMotion:
     def __init__(self, file_path: str, device: str = "cpu"):
         data = np.load(file_path, allow_pickle=True)
         self.name = os.path.splitext(os.path.basename(file_path))[0]
-        self.fps = float(data["fps"][0])
+        self.fps = float(np.asarray(data["fps"]).flat[0])
         self.joint_pos = torch.tensor(data["joint_pos"], dtype=torch.float32, device=device)
         self.joint_vel = torch.tensor(data["joint_vel"], dtype=torch.float32, device=device)
         self.body_pos_w = torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device)
@@ -152,64 +141,6 @@ class FkNpzMotion:
 
     def __repr__(self):
         return f"FkNpzMotion({self.name}: {self.num_frames} frames @ {self.fps} fps, {self.num_bodies} bodies)"
-
-
-class LegacyMergedNpzMotion:
-    """Loads old-format merged .npz (dof, root_trans_offset, root_rot)."""
-
-    def __init__(self, file_path: str, device: str = "cpu"):
-        data = np.load(file_path, allow_pickle=True)
-        self.name = os.path.splitext(os.path.basename(file_path))[0]
-        self.fps = float(data["fps"][0])
-        self.num_frames = int(data["num_frames"][0])
-        self.joint_pos = torch.tensor(data["dof"], dtype=torch.float32, device=device)
-        self.root_pos = torch.tensor(data["root_trans_offset"], dtype=torch.float32, device=device)
-        root_rot_xyzw = torch.tensor(data["root_rot"], dtype=torch.float32, device=device)
-        self.root_quat_wxyz = root_rot_xyzw[:, [3, 0, 1, 2]]
-        self.num_bodies = 0
-        self.body_pos_w = None
-
-        dt = 1.0 / self.fps
-        self.joint_vel = torch.zeros_like(self.joint_pos)
-        self.joint_vel[1:-1] = (self.joint_pos[2:] - self.joint_pos[:-2]) / (2.0 * dt)
-        self.joint_vel[0] = (self.joint_pos[1] - self.joint_pos[0]) / dt
-        self.joint_vel[-1] = (self.joint_pos[-1] - self.joint_pos[-2]) / dt
-
-
-class OmniRetargetNpzMotion:
-    """Loads an OmniRetarget .npz (qpos = [root_pos(3), root_quat_wxyz(4), dof(23)])."""
-
-    def __init__(self, file_path: str, device: str = "cpu"):
-        data = np.load(file_path, allow_pickle=True)
-        self.name = os.path.splitext(os.path.basename(file_path))[0]
-        self.fps = float(data["fps"])
-        qpos = torch.tensor(np.array(data["qpos"], dtype=np.float64).astype(np.float32), device=device)
-        self.num_frames = qpos.shape[0]
-
-        self.root_pos = qpos[:, :3]
-        self.root_quat_wxyz = qpos[:, 3:7]             # already wxyz (MuJoCo convention)
-        omni_dof = qpos[:, 7:]                          # 23 joints in omniretarget order
-        # Remap from omniretarget order (waist-arms-legs) to DR02_PRO_JOINT_NAMES (legs-waist-arms)
-        self.joint_pos = omni_dof[:, OMNI_TO_DEEP]
-
-        self.num_bodies = 0
-        self.body_pos_w = None
-
-        dt = 1.0 / self.fps
-        self.joint_vel = torch.zeros_like(self.joint_pos)
-        self.joint_vel[1:-1] = (self.joint_pos[2:] - self.joint_pos[:-2]) / (2.0 * dt)
-        self.joint_vel[0] = (self.joint_pos[1] - self.joint_pos[0]) / dt
-        self.joint_vel[-1] = (self.joint_pos[-1] - self.joint_pos[-2]) / dt
-
-
-class LegacyFkNpzMotion:
-    """Loads old-format FK .npz (body_pos_w only)."""
-
-    def __init__(self, file_path: str, device: str = "cpu"):
-        data = np.load(file_path, allow_pickle=True)
-        self.body_pos_w = torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device)
-        self.num_frames = self.body_pos_w.shape[0]
-        self.num_bodies = self.body_pos_w.shape[1]
 
 
 # ---------------------------------------------------------------------------
@@ -398,27 +329,18 @@ def run_simulator(sim: SimulationContext, scene: InteractiveScene):
             motion_names.append(motions[-1].name)
         print(f"[INFO] Loaded {len(motions)} motions from {args_cli.folder}")
     else:
-        # Legacy single-file mode
-        if args_cli.retarget_format == "omniretarget":
-            motions.append(OmniRetargetNpzMotion(args_cli.file, device=device))
-        else:
-            motions.append(LegacyMergedNpzMotion(args_cli.file, device=device))
+        motions.append(FkNpzMotion(args_cli.file, device=device))
         motion_names.append(motions[0].name)
-
-    # Legacy FK file for sphere visualization with old format
-    legacy_fk = None
-    if args_cli.fk_file is not None:
-        legacy_fk = LegacyFkNpzMotion(args_cli.fk_file, device=device)
 
     current_idx = 0
     motion = motions[current_idx]
 
     # ---- FK sphere markers ----
     fk_offset = torch.tensor([FK_X_OFFSET, 0.0, 0.0], device=device)
-    has_fk = motion.body_pos_w is not None or legacy_fk is not None
+    has_fk = motion.body_pos_w is not None
     fk_markers = None
     if has_fk:
-        num_bodies = motion.num_bodies if motion.body_pos_w is not None else legacy_fk.num_bodies
+        num_bodies = motion.num_bodies
         fk_markers = VisualizationMarkers(
             VisualizationMarkersCfg(
                 prim_path="/Visuals/FkKeypoints",
@@ -465,11 +387,11 @@ def run_simulator(sim: SimulationContext, scene: InteractiveScene):
         jpos = robot.data.default_joint_pos[0:1].clone()
         jvel = robot.data.default_joint_vel[0:1].clone()
         if isinstance(motion, FkNpzMotion):
-            # New format: joint_pos is already in articulation order
+            # FK format: joint_pos is already in articulation order
             jpos[0, :] = motion.joint_pos[frame]
             jvel[0, :] = motion.joint_vel[frame]
         else:
-            # Legacy / OmniRetarget: dof is in DR02_PRO_JOINT_NAMES order, needs remapping
+            # Other formats: dof needs remapping
             jpos[0, robot_joint_indices] = motion.joint_pos[frame]
             jvel[0, robot_joint_indices] = motion.joint_vel[frame]
         robot.write_joint_state_to_sim(jpos, jvel, env_ids=env_ids)
@@ -481,10 +403,6 @@ def run_simulator(sim: SimulationContext, scene: InteractiveScene):
         if motion.body_pos_w is not None:
             fk_body_pos = motion.body_pos_w[frame].clone()
             fk_num_bodies = motion.num_bodies
-        elif legacy_fk is not None:
-            fk_frame = min(frame, legacy_fk.num_frames - 1)
-            fk_body_pos = legacy_fk.body_pos_w[fk_frame].clone()
-            fk_num_bodies = legacy_fk.num_bodies
 
         if fk_body_pos is not None and fk_markers is not None:
             fk_body_pos += env_origin + fk_offset

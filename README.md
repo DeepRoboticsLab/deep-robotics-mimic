@@ -4,11 +4,14 @@ Humanoid motion tracking training on Isaac Lab. Trains PPO policies that track r
 
 ## 1. Installation
 
+> [!NOTE]
+> **This project has been verified on Ubuntu 24.04 + NVIDIA driver 580.173.02 + CUDA 13.0**
+
 - Install dependencies (Isaac Lab v2.3.2 + PyTorch 2.7.0 + rsl-rl-lib 5.0.1)
 
 ```bash
-conda create -n mimic python=3.11
-conda activate mimic
+conda create -n deep-robotics-humanoid python=3.11 # same environment as the deep-robotics-retarget project
+conda activate deep-robotics-humanoid
 
 pip install --upgrade pip
 
@@ -37,19 +40,30 @@ python -m pip install -e source/whole_body_tracking
 
 ## 2. Data Pipeline
 
-Raw pipeline: BVH/SMPLX → `.pkl` (retargeting) → `.npz` → FK `.npz` → Training → `.json` (deployment)
+Full pipeline: BVH/SMPLX → `.pkl` (retargeting) → FK `.npz` → Training
 
-### 2.1. BVH/SMPLX → pkl → npz (retargeting)
+### 2.1. BVH/SMPLX → pkl (retargeting)
 
-Retargeting is done by the companion project `deep-robotics-retarget`. Its outputs are robot joint `.pkl` files.
+Retargeting is done by the companion project `deep-robotics-retarget`. Its outputs are robot joint `.pkl` files, which can be converted directly to FK `.npz` in one step (see 2.2).
 
-### 2.2. npz → FK npz (forward kinematics, requires Isaac Sim)
+### 2.2. pkl/npz → FK npz (forward kinematics, requires Isaac Sim)
 
-**Single file:**
+**Single file (PKL input, one step to FK npz):**
+```bash
+python scripts/convert_DR02_pro.py \
+  --input <motion>.pkl \
+  --output dataset/gmr/<motion>.npz \
+  --num_envs 10000 \
+  --output_fps 50 \
+  --retarget_format gmr \
+  --headless
+```
+
+**Single file (NPZ input):**
 ```bash
 python scripts/convert_DR02_pro.py \
   --input <motion>.npz \
-  --output dataset/gmr/<motion>.npz \
+  --output dataset/gmr/<motion>_fk.npz \
   --num_envs 10000 \
   --output_fps 50 \
   --retarget_format gmr \
@@ -59,7 +73,7 @@ python scripts/convert_DR02_pro.py \
 **Batch folder:**
 ```bash
 python scripts/batch_convert_DR02_pro.py \
-  --input_dir <source_npz_folder>/ \
+  --input_dir <source_folder>/ \
   --output_dir dataset/ \
   --num_envs 10000 \
   --output_fps 50 \
@@ -67,19 +81,13 @@ python scripts/batch_convert_DR02_pro.py \
   --headless
 ```
 
-Supported `--retarget_format`: `deep_retarget`, `omniretarget`, `gmr`
-
-### 2.3. npz → json (for deployment controller)
-
-```bash
-python scripts/npz_to_json.py --input <file>.npz --output <file>.json
-```
+Supported `--retarget_format`: `deep_retarget`, `omniretarget`, `gmr`. `.pkl` inputs (gmr retargeting output) are only supported with `gmr`; a batch folder may contain mixed `.pkl` and `.npz` files.
 
 ## 3. Visualization (Isaac Sim, requires Isaac Sim)
 
 ```bash
 python scripts/replay_merged.py --folder dataset/gmr/   # folder of FK npz files
-python scripts/replay_merged.py --file <file>.npz --fk_file <fk_file>.npz  # legacy single-file mode
+python scripts/replay_merged.py --file dataset/gmr/boxing.npz   # single-file mode
 ```
 
 ## 4. Visualization (MuJoCo, no Isaac Sim required)
@@ -89,8 +97,11 @@ pip install mujoco
 
 python scripts/replay_npz_mujoco.py                       # interactive file selection
 python scripts/replay_npz_mujoco.py dataset/gmr/<motion>.npz
-python scripts/replay_npz_mujoco.py dataset/gmr/<motion>.npz --verify   # FK accuracy verification
+python scripts/replay_npz_mujoco.py dataset/raw/pkl/<motion>.pkl   # also supports gmr retargeted PKL
+python scripts/replay_npz_mujoco.py dataset/gmr/<motion>.npz --verify   # FK accuracy verification (NPZ only)
 ```
+
+Playback includes a ground plane, robot-following lighting, an on-screen progress bar, and Space-key pause/resume.
 
 ## 5. Training (requires Isaac Sim)
 
@@ -108,6 +119,20 @@ python scripts/rsl_rl/train.py \
   --max_iterations 100000
 ```
 
+**Parameter reference:**
+
+| Flag | Description |
+|---|---|
+| `--task` | Task name; loads the environment and default PPO config from the Isaac Lab registry |
+| `--registry_name` | Path to the reference motion file (FK npz); only needed for single-motion training — multi-motion tasks use `info.yaml` dataset indexing |
+| `--logger` | Logging backend: `tensorboard` / `wandb` / `neptune` |
+| `--log_project_name` | Log output directory |
+| `--run_name` | Run name suffix used to tell experiments apart under the log directory |
+| `--headless` | No GUI mode; disables the Isaac Sim render window (recommended for large-scale training) |
+| `--num_envs` | Total number of parallel environments (split across GPUs) |
+| `--max_iterations` | Maximum PPO training iterations |
+| `--device` | Compute device (e.g. `cuda:0`); used for single-GPU training |
+
 ### 5.2. Multi-GPU
 
 ```bash
@@ -123,6 +148,21 @@ python -m torch.distributed.run --nnodes=1 --nproc_per_node=2 \
   --num_envs 4096 \
   --max_iterations 200000
 ```
+
+**Parameter reference:**
+
+| Flag | Description |
+|---|---|
+| `--nnodes=1 --nproc_per_node=2` | PyTorch distributed launcher options: 1 node, 2 processes per node (i.e. data-parallel training on 2 GPUs) |
+| `--task` | Task name; loads the environment and default PPO config from the Isaac Lab registry |
+| `--registry_name` | Path to the reference motion file (FK npz); only needed for single-motion training — multi-motion tasks use `info.yaml` dataset indexing |
+| `--logger` | Logging backend: `tensorboard` / `wandb` / `neptune` |
+| `--log_project_name` | Log output directory |
+| `--run_name` | Run name suffix used to tell experiments apart under the log directory |
+| `--headless` | No GUI mode; disables the Isaac Sim render window (recommended for large-scale training) |
+| `--distributed` | Marks a distributed run; only use together with `torch.distributed.run` |
+| `--num_envs` | Total number of parallel environments (split across GPUs) |
+| `--max_iterations` | Maximum PPO training iterations |
 
 ### 5.3. Resume from checkpoint
 
@@ -241,7 +281,7 @@ python scripts/auto_info_yaml.py \
 
 ## 10. Motion Data
 
-Training-ready FK `.npz` files are under `dataset/gmr/` (e.g. `jugong.npz`, `huishou.npz`, `daquan.npz`).
+Training-ready FK `.npz` files are under `dataset/gmr/` (e.g. `bow.npz`, `boxing.npz`, `wave_hand.npz`).
 
 ## 11. License
 
