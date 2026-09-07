@@ -5,12 +5,12 @@ Humanoid motion tracking training on Isaac Lab. Trains PPO policies that track r
 ## 1. Installation
 
 > [!NOTE]
-> **This project has been verified on Ubuntu 24.04 + NVIDIA driver 580.173.02 + CUDA 13.0**
+> **This project has been verified on Ubuntu 22.04/24.04 + NVIDIA driver 580.173.02 + CUDA 13.0**
 
 - Install dependencies (Isaac Lab v2.3.2 + PyTorch 2.7.0 + rsl-rl-lib 5.0.1)
 
 ```bash
-conda create -n deep-robotics-humanoid python=3.11 # same environment as the deep-robotics-retarget project
+conda create -n deep-robotics-humanoid python=3.11 -y # same environment as the deep-robotics-retarget project
 conda activate deep-robotics-humanoid
 
 pip install --upgrade pip
@@ -18,7 +18,7 @@ pip install --upgrade pip
 # Install base tools
 pip install setuptools==80.9.0 wheel packaging
 
-pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0
 
 pip install flatdict==4.0.1 --no-build-isolation
 
@@ -30,6 +30,41 @@ pip install rsl-rl-lib==5.0.1
 pip list | grep -E "torch|isaac|rsl|stable"
 ```
 
+Expected versions:
+
+```
+isaaclab                             2.3.2
+isaacsim                             5.1.0.0
+isaacsim-app                         5.1.0.0
+isaacsim-asset                       5.1.0.0
+isaacsim-benchmark                   5.1.0.0
+isaacsim-code-editor                 5.1.0.0
+isaacsim-core                        5.1.0.0
+isaacsim-cortex                      5.1.0.0
+isaacsim-example                     5.1.0.0
+isaacsim-extscache-kit               5.1.0.0
+isaacsim-extscache-kit-sdk           5.1.0.0
+isaacsim-extscache-physics           5.1.0.0
+isaacsim-gui                         5.1.0.0
+isaacsim-kernel                      5.1.0.0
+isaacsim-replicator                  5.1.0.0
+isaacsim-rl                          5.1.0.0
+isaacsim-robot                       5.1.0.0
+isaacsim-robot-motion                5.1.0.0
+isaacsim-robot-setup                 5.1.0.0
+isaacsim-ros1                        5.1.0.0
+isaacsim-ros2                        5.1.0.0
+isaacsim-sensor                      5.1.0.0
+isaacsim-storage                     5.1.0.0
+isaacsim-template                    5.1.0.0
+isaacsim-test                        5.1.0.0
+isaacsim-utils                       5.1.0.0
+rsl-rl-lib                           5.0.1
+stable_baselines3                    2.8.0
+torch                                2.7.0
+torchaudio                           2.7.0
+torchvision                          0.22.0
+```
 - Clone and install:
 
 ```bash
@@ -37,6 +72,10 @@ git clone https://github.com/DeepRoboticsLab/deep-robotics-mimic.git
 cd deep-robotics-mimic
 python -m pip install -e source/whole_body_tracking
 ```
+
+### Known issue: Isaac Sim 5.1.0 startup crash with NVIDIA driver 595.x
+
+A startup segmentation fault in `librtx.scenedb.plugin.so` was reported on Ubuntu 24.04.4 with an RTX 4090 and driver 595.71.05, even after disabling IOMMU. NVIDIA support attributes the crash to driver incompatibility and recommends switching to the validated Linux driver 580.65.06. This project was tested with driver 580.173.02, as noted above. See the [NVIDIA forum discussion](https://forums.developer.nvidia.com/t/isaac-sim-5-1-0-crashes-on-startup-with-rtx-4090-on-ubuntu-24-04-4-segfaulting-in-librtx-scenedb-plugin-so-after-iommu-was-disabled/371957) for details.
 
 ## 2. Data Pipeline
 

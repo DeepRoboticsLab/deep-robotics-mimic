@@ -21,6 +21,16 @@ import argparse
 import os
 import sys
 
+# Load conda's C++ runtime before Isaac Sim can load the system copy.
+# On Ubuntu 22.04, the system library lacks CXXABI_1.3.15 required by
+# conda's ICU (loaded by Python's _ctypes), breaking Kit extension imports.
+if sys.platform == "linux" and os.path.isdir(os.path.join(sys.prefix, "conda-meta")):
+    import ctypes
+
+    _conda_libstdcxx = os.path.join(sys.prefix, "lib", "libstdc++.so.6")
+    if os.path.isfile(_conda_libstdcxx):
+        ctypes.CDLL(_conda_libstdcxx, mode=ctypes.RTLD_GLOBAL)
+
 from isaaclab.app import AppLauncher
 
 # local imports

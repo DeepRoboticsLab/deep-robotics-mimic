@@ -5,12 +5,12 @@
 ## 1. 安装
 
 > [!NOTE]
-> **该项目已在 ubuntu 24.04 + NVIDIA 驱动 580.173.02 + CUDA 13.0 环境下验证通过**
+> **该项目已在 Ubuntu 22.04/24.04 + NVIDIA 驱动 580.173.02 + CUDA 13.0 环境下验证通过**
 
 - 安装依赖环境（Isaac Lab v2.3.2 + PyTorch 2.7.0 + rsl-rl-lib 5.0.1）
 
 ```bash
-conda create -n deep-robotics-humanoid python=3.11 # 该环境与deep-robotics-retarget项目的环境一致
+conda create -n deep-robotics-humanoid python=3.11 -y # 该环境与deep-robotics-retarget项目的环境一致
 conda activate deep-robotics-humanoid
 
 pip install --upgrade pip
@@ -18,7 +18,7 @@ pip install --upgrade pip
 #  安装基础工具
 pip install setuptools==80.9.0 wheel packaging
 
-pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 
 
 pip install flatdict==4.0.1 --no-build-isolation
 
@@ -30,6 +30,42 @@ pip install rsl-rl-lib==5.0.1
 pip list | grep -E "torch|isaac|rsl|stable"
 ```
 
+预期版本：
+
+```
+isaaclab                             2.3.2
+isaacsim                             5.1.0.0
+isaacsim-app                         5.1.0.0
+isaacsim-asset                       5.1.0.0
+isaacsim-benchmark                   5.1.0.0
+isaacsim-code-editor                 5.1.0.0
+isaacsim-core                        5.1.0.0
+isaacsim-cortex                      5.1.0.0
+isaacsim-example                     5.1.0.0
+isaacsim-extscache-kit               5.1.0.0
+isaacsim-extscache-kit-sdk           5.1.0.0
+isaacsim-extscache-physics           5.1.0.0
+isaacsim-gui                         5.1.0.0
+isaacsim-kernel                      5.1.0.0
+isaacsim-replicator                  5.1.0.0
+isaacsim-rl                          5.1.0.0
+isaacsim-robot                       5.1.0.0
+isaacsim-robot-motion                5.1.0.0
+isaacsim-robot-setup                 5.1.0.0
+isaacsim-ros1                        5.1.0.0
+isaacsim-ros2                        5.1.0.0
+isaacsim-sensor                      5.1.0.0
+isaacsim-storage                     5.1.0.0
+isaacsim-template                    5.1.0.0
+isaacsim-test                        5.1.0.0
+isaacsim-utils                       5.1.0.0
+rsl-rl-lib                           5.0.1
+stable_baselines3                    2.8.0
+torch                                2.7.0+cu128
+torchaudio                           2.7.0+cu128
+torchvision                          0.22.0+cu128
+```
+
 - 克隆并安装：
 
 ```bash
@@ -37,6 +73,10 @@ git clone https://github.com/DeepRoboticsLab/deep-robotics-mimic.git
 cd deep-robotics-mimic
 python -m pip install -e source/whole_body_tracking
 ```
+
+### 已知问题：NVIDIA 595.x 驱动下 Isaac Sim 5.1.0 启动崩溃
+
+有用户报告，在 Ubuntu 24.04.4、RTX 4090 和 595.71.05 驱动环境下，启动时出现 `librtx.scenedb.plugin.so` 段错误，禁用 IOMMU 后仍然崩溃。NVIDIA 支持人员将其归因于驱动兼容性问题，建议切换到经过验证的 Linux 驱动 580.65.06。本项目使用的测试驱动为上文所列的 580.173.02。详情参见 [NVIDIA 论坛讨论](https://forums.developer.nvidia.com/t/isaac-sim-5-1-0-crashes-on-startup-with-rtx-4090-on-ubuntu-24-04-4-segfaulting-in-librtx-scenedb-plugin-so-after-iommu-was-disabled/371957)。
 
 ## 2. 数据格式转换
 
@@ -87,7 +127,7 @@ python scripts/batch_convert_DR02_pro.py \
 
 ```bash
 python scripts/replay_merged.py --folder dataset/gmr/   # FK npz 文件文件夹
-python scripts/replay_merged.py --file dataset/gmr/boxing.npz   # 单文件模式
+python scripts/replay_merged.py --file dataset/gmr/<motion.npz>   # 单文件模式
 ```
 
 ## 4. 可视化（MuJoCo，无需 Isaac Sim）
@@ -130,7 +170,7 @@ python scripts/rsl_rl/train.py \
 | `--logger` | 日志后端：`tensorboard` / `wandb` / `neptune` |
 | `--log_project_name` | 日志输出目录 |
 | `--run_name` | 本次运行名称后缀，用于区分日志目录下不同的实验 |
-| `--headless` | 无界面模式，不启动渲染窗口（大规模训练必开） |
+| `--headless` | 无界面模式，不启动渲染窗口（大规模训练推荐） |
 | `--num_envs` | 并行仿真环境总数（会分摊到各 GPU 上） |
 | `--max_iterations` | PPO 最大训练迭代次数 |
 | `--device` | 指定计算设备（如 `cuda:0`），单 GPU 时使用 |
@@ -161,7 +201,7 @@ python -m torch.distributed.run --nnodes=1 --nproc_per_node=2 \
 | `--logger` | 日志后端：`tensorboard` / `wandb` / `neptune` |
 | `--log_project_name` | 日志输出目录 |
 | `--run_name` | 本次运行名称后缀，用于区分日志目录下不同的实验 |
-| `--headless` | 无界面模式，不启动渲染窗口（大规模训练必开） |
+| `--headless` | 无界面模式，不启动渲染窗口（大规模训练推荐） |
 | `--distributed` | 声明分布式运行，仅在配合 `torch.distributed.run` 启动时使用 |
 | `--num_envs` | 并行仿真环境总数（会分摊到各 GPU 上） |
 | `--max_iterations` | PPO 最大训练迭代次数 |
@@ -231,7 +271,6 @@ python scripts/rsl_rl/play.py \
 同时会自动将 ONNX 导出到检查点旁边的 `exported/` 子目录。
 
 ## 7. ONNX 导出
-
 
 ```bash
 python scripts/rsl_rl/export_onnx_fast.py \

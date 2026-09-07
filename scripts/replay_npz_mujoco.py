@@ -92,6 +92,7 @@ SCENE_WORLDBODY_XML = (
 ROBOT_BASE_BODY = "base_link"
 VIEWER_CAM_DISTANCE = 2.5
 VIEWER_CAM_ELEVATION = -10
+VIEWER_CAM_AZIMUTH = 135
 
 # In-viewer progress bar layout (drawn with user scene geoms).
 BAR_HALF_LENGTH = 0.4   # half length of the track (m), bar lies along +x
@@ -407,7 +408,7 @@ def draw_progress_bar(viewer, frame: int, num_frames: int, fps: float,
 
     track_center = np.array([root_pos[0], root_pos[1], BAR_HEIGHT])
     fill_half = max(progress * BAR_HALF_LENGTH, 1e-6)
-    fill_center = track_center + np.array([BAR_HALF_LENGTH - fill_half, 0.0, 0.0])
+    fill_center = track_center + np.array([fill_half - BAR_HALF_LENGTH, 0.0, 0.0])
 
     # --- Track (gray background bar) ---
     geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
@@ -506,6 +507,28 @@ def replay_motion(motion_path: str, speed: float = 1.0, loop: bool = True,
         show_right_ui=False,
         key_callback=key_callback,
     ) as viewer:
+        # Frame the actual first pose, which may be far from the model origin.
+        # Exclude the floor and include each robot geom's bounding radius so
+        # that the feet, head, and outstretched hands all fit with some margin.
+        robot_geoms = model.geom_bodyid != 0
+        centers = data.geom_xpos[robot_geoms]
+        radii = model.geom_rbound[robot_geoms]
+        lower = np.min(centers - radii[:, None], axis=0)
+        upper = np.max(centers + radii[:, None], axis=0)
+        lookat = (lower + upper) / 2
+        radius = np.max(np.linalg.norm(centers - lookat, axis=1) + radii)
+        distance = max(
+            VIEWER_CAM_DISTANCE,
+            1.15 * radius / np.sin(np.deg2rad(model.vis.global_.fovy / 2)),
+        )
+        with viewer.lock():
+            viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+            viewer.cam.lookat[:] = lookat
+            viewer.cam.distance = distance
+            viewer.cam.azimuth = VIEWER_CAM_AZIMUTH
+            viewer.cam.elevation = VIEWER_CAM_ELEVATION
+        viewer.sync()
+
         while viewer.is_running():
             if playing and not state["paused"]:
                 # Set root body pose for current frame
