@@ -230,7 +230,6 @@ python scripts/rsl_rl/play.py \
 
 ## 7. ONNX 导出
 
-### 7.1. 快速导出（无需 Isaac Sim）
 
 ```bash
 python scripts/rsl_rl/export_onnx_fast.py \
@@ -239,14 +238,6 @@ python scripts/rsl_rl/export_onnx_fast.py \
 ```
 
 从检查点推断网络结构。嵌入硬编码的 DR02_pro 元数据（关节名称、刚度/阻尼、动作缩放）。
-
-### 7.2. 导出动作 json + 策略 onnx（交互式）
-
-```bash
-python scripts/export_motion_and_policy.py
-```
-
-扫描 `logs/rsl_rl/` 下的训练运行目录，通过 `npz_to_json.py` 将 `params/env.yaml` 中的动作文件转换为 JSON，并通过 `export_onnx_fast.py` 将选中的 `model_*.pt` 检查点导出为 ONNX。
 
 ## 8. 工具
 
