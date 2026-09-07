@@ -40,7 +40,7 @@ python -m pip install -e source/whole_body_tracking
 
 ## 2. 数据格式转换
 
-完整转换流程：BVH/SMPLX → `.pkl`（重定向）→ FK `.npz` → 训练
+完整转换流程：BVH/SMPLX → `.pkl`（重定向）→ FK `.npz` → 训练/部署
 
 ### 2.1. BVH/SMPLX → pkl（重定向）
 
@@ -104,6 +104,8 @@ python scripts/replay_npz_mujoco.py dataset/gmr/<motion>.npz --verify   # FK 精
 回放包含地面、跟随机器人的灯光、进度条，支持空格键暂停/恢复。
 
 ## 5. 训练（需要 Isaac Sim）
+
+我们在[Google Drive](https://drive.google.com/file/d/1WZSotMt6sdUiRtC0KPP94JEuQiuvMezd/view?usp=sharing)里上传了拳击动作的训练日志，其中包含训练环境和智能体的配置信息和策略文件，策略文件已经经过部署测试，可供对比参考使用。
 
 ### 5.1. 单 GPU
 
@@ -259,7 +261,6 @@ python scripts/auto_info_yaml.py \
 |---|---|
 | npz → FK npz（单文件） | `scripts/convert_DR02_pro.py` |
 | npz → FK npz（批量） | `scripts/batch_convert_DR02_pro.py` |
-| npz → json | `scripts/npz_to_json.py` |
 | 导出动作 + 策略 ONNX | `scripts/export_motion_and_policy.py` |
 | 生成数据集 info.yaml | `scripts/auto_info_yaml.py` |
 | 对比运行配置 | `scripts/compare_runs.py` |

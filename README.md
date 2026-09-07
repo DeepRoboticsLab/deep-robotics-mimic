@@ -40,7 +40,7 @@ python -m pip install -e source/whole_body_tracking
 
 ## 2. Data Pipeline
 
-Full pipeline: BVH/SMPLX → `.pkl` (retargeting) → FK `.npz` → Training
+Full pipeline: BVH/SMPLX → `.pkl` (retargeting) → FK `.npz` → Training/Deployment
 
 ### 2.1. BVH/SMPLX → pkl (retargeting)
 
@@ -87,7 +87,7 @@ Supported `--retarget_format`: `deep_retarget`, `omniretarget`, `gmr`. `.pkl` in
 
 ```bash
 python scripts/replay_merged.py --folder dataset/gmr/   # folder of FK npz files
-python scripts/replay_merged.py --file dataset/gmr/boxing.npz   # single-file mode
+python scripts/replay_merged.py --file dataset/gmr/<motion.npz>   # single-file mode
 ```
 
 ## 4. Visualization (MuJoCo, no Isaac Sim required)
@@ -104,6 +104,8 @@ python scripts/replay_npz_mujoco.py dataset/gmr/<motion>.npz --verify   # FK acc
 Playback includes a ground plane, robot-following lighting, an on-screen progress bar, and Space-key pause/resume.
 
 ## 5. Training (requires Isaac Sim)
+
+We have uploaded the training logs of the boxing motion to [Google Drive](https://drive.google.com/file/d/1WZSotMt6sdUiRtC0KPP94JEuQiuvMezd/view?usp=sharing). They contain the training environment and agent configuration files as well as the policy checkpoints. The policies have been deployment-tested and can be used as a reference for comparison.
 
 ### 5.1. Single GPU
 
@@ -230,8 +232,6 @@ Also auto-exports ONNX to an `exported/` subdirectory next to the checkpoint.
 
 ## 7. ONNX Export
 
-### 7.1. Fast export (no Isaac Sim)
-
 ```bash
 python scripts/rsl_rl/export_onnx_fast.py \
   --checkpoint_path logs/rsl_rl/DR02_pro_flat/<run>/model_10000.pt \
@@ -239,14 +239,6 @@ python scripts/rsl_rl/export_onnx_fast.py \
 ```
 
 Infers network shape from checkpoint. Embeds hardcoded DR02_pro metadata (joint names, stiffness/damping, action scale).
-
-### 7.2. Export motion json + policy onnx (interactive)
-
-```bash
-python scripts/export_motion_and_policy.py
-```
-
-Scans training runs under `logs/rsl_rl/`, converts the motion file from `params/env.yaml` to JSON via `npz_to_json.py`, and exports the selected `model_*.pt` checkpoint to ONNX via `export_onnx_fast.py`.
 
 ## 8. Utilities
 
@@ -268,7 +260,6 @@ python scripts/auto_info_yaml.py \
 |---|---|
 | npz → FK npz (single) | `scripts/convert_DR02_pro.py` |
 | npz → FK npz (batch) | `scripts/batch_convert_DR02_pro.py` |
-| npz → json | `scripts/npz_to_json.py` |
 | Export motion + policy ONNX | `scripts/export_motion_and_policy.py` |
 | Generate dataset info.yaml | `scripts/auto_info_yaml.py` |
 | Compare run configs | `scripts/compare_runs.py` |

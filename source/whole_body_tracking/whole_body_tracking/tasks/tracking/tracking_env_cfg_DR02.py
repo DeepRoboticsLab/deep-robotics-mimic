@@ -294,7 +294,7 @@ class RewardsCfg:
     motion_body_pos = RewTerm(
         func=mdp.motion_relative_body_position_error_exp,
         weight=1.0,
-        params={"command_name": "motion", "std": 0.2,
+        params={"command_name": "motion", "std": 0.3,
                 "weight" : [1, 1, 1, 2, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1]},
     )
     
@@ -337,6 +337,12 @@ class RewardsCfg:
     joint_power = RewTerm(
         func=mdp.joint_power, weight=-1e-6 * scale
     )
+
+    joint_acc_l2 = RewTerm(
+        func=mdp.joint_acc_l2, weight=-1e-9 * scale #-1e-9*scale
+    )
+
+    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-1e-2 * scale * 2 ) # 4
 
     undesired_contacts = RewTerm(
         func=mdp.undesired_contacts,
