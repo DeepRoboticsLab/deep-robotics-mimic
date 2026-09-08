@@ -73,6 +73,21 @@ cd deep-robotics-mimic
 python -m pip install -e source/whole_body_tracking
 ```
 
+
+### Conda C++ runtime setup (Linux/Bash)
+
+Before starting Isaac Sim, run this once in the shared environment from this repository root:
+
+```bash
+python scripts/setup_conda_runtime.py
+conda deactivate
+conda activate deep-robotics-humanoid
+```
+
+If the script reports a missing or outdated runtime, run `conda install -c conda-forge "libstdcxx-ng>=15"` and retry. It installs environment activation/deactivation hooks that load Conda's `libstdc++.so.6` before Isaac Sim loads the older system copy. Existing `LD_PRELOAD` settings are restored on deactivation; system libraries are unchanged. The same hook is used by `rl_training`, so rerunning setup is safe and one installation covers all repositories sharing this environment.
+
+This fixes `CXXABI_1.3.15 not found` and the resulting `omni.kit.test` / `omni.graph.core.tests` import errors. Training, playback, and conversion rely on this environment hook to select the runtime before Python starts. Restart existing Python processes after reactivating. Headless viewport, URDF inertia/joint-axis, and GPU performance warnings have separate causes and are not removed by this fix.
+
 ### Known issue: Isaac Sim 5.1.0 startup crash with NVIDIA driver 595.x
 
 A startup segmentation fault in `librtx.scenedb.plugin.so` was reported on Ubuntu 24.04.4 with an RTX 4090 and driver 595.71.05, even after disabling IOMMU. NVIDIA support attributes the crash to driver incompatibility and recommends switching to the validated Linux driver 580.65.06. This project was tested with driver 580.173.02, as noted above. See the [NVIDIA forum discussion](https://forums.developer.nvidia.com/t/isaac-sim-5-1-0-crashes-on-startup-with-rtx-4090-on-ubuntu-24-04-4-segfaulting-in-librtx-scenedb-plugin-so-after-iommu-was-disabled/371957) for details.
