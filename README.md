@@ -282,7 +282,7 @@ python scripts/rsl_rl/play.py \
   --num_envs 2
 ```
 
-Also auto-exports ONNX to an `exported/` subdirectory next to the checkpoint.
+Also auto-exports `exported/policy.onnx` next to the checkpoint.
 
 ## 7. ONNX Export
 
@@ -292,7 +292,7 @@ python scripts/rsl_rl/export_onnx_fast.py \
   --output_name <motion>.onnx
 ```
 
-Infers network shape from checkpoint. Embeds hardcoded DR02_pro metadata (joint names, stiffness/damping, action scale).
+Both exports are compatible with [deep-robotics-sdk2](https://github.com/DeepRoboticsLab/deep-robotics-sdk2). For deployment, copy the motion NPZ to `src/dr02_pro/state_machine/motion_data/` and the policy ONNX to `src/dr02_pro/state_machine/policy/` in the SDK repository. See the SDK repository for deployment details.
 
 ## 8. Utilities
 

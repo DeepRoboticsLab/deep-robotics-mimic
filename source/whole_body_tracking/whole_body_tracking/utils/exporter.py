@@ -14,6 +14,38 @@ from isaaclab_rl.rsl_rl.exporter import _OnnxPolicyExporter
 from whole_body_tracking.tasks.tracking.mdp import MotionCommand
 
 
+def export_policy_as_onnx(
+    actor_critic: object,
+    path: str,
+    normalizer: object | None = None,
+    filename="policy.onnx",
+    verbose=False,
+):
+    """Export obs -> actions with the fast exporter / SDK runner interface.
+
+    Observation normalization is included when supplied. Reference motion,
+    action scaling, and joint offsets are handled by the caller.
+    """
+    if actor_critic.is_recurrent:
+        raise ValueError("The SDK policy-only interface requires a feed-forward actor.")
+    os.makedirs(path, exist_ok=True)
+    policy_exporter = _OnnxPolicyExporter(actor_critic, normalizer, verbose)
+    policy_exporter.to("cpu").eval()
+    obs = torch.zeros(1, policy_exporter.actor[0].in_features)
+    torch.onnx.export(
+        policy_exporter,
+        obs,
+        os.path.join(path, filename),
+        export_params=True,
+        opset_version=11,
+        verbose=verbose,
+        input_names=["obs"],
+        output_names=["actions"],
+        dynamic_axes={},
+        dynamo=False,
+    )
+
+
 def export_motion_policy_as_onnx(
     env: ManagerBasedRLEnv,
     actor_critic: object,

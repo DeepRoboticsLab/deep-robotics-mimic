@@ -67,7 +67,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 
 # Import extensions to set up environment tasks
 import whole_body_tracking.tasks  # noqa: F401
-from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
+from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_policy_as_onnx
 
 
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
@@ -217,7 +217,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # obtain the trained policy for inference
     policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
 
-    # export policy to onnx/jit
+    # Export obs -> actions for the SDK mimic runner (motion is supplied externally).
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
     actor_model = getattr(ppo_runner.alg, "policy", getattr(ppo_runner.alg, "actor", None))
     normalizer = getattr(actor_model, "obs_normalizer", getattr(ppo_runner.alg, "obs_normalizer", None))
@@ -231,8 +231,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             self.is_recurrent = False
     try:
         wrapped = _PolicyWrapper(actor_model, normalizer)
-        export_motion_policy_as_onnx(
-            env.unwrapped,
+        export_policy_as_onnx(
             wrapped,
             normalizer=normalizer,
             path=export_model_dir,
@@ -266,4 +265,3 @@ if __name__ == "__main__":
     main()
     # close sim app
     simulation_app.close()
-

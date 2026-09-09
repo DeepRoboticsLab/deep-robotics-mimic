@@ -283,7 +283,7 @@ python scripts/rsl_rl/play.py \
   --num_envs 2
 ```
 
-同时会自动将 ONNX 导出到检查点旁边的 `exported/` 子目录。
+同时会自动导出到检查点旁边的 `exported/policy.onnx`。
 
 ## 7. ONNX 导出
 
@@ -293,7 +293,7 @@ python scripts/rsl_rl/export_onnx_fast.py \
   --output_name <motion>.onnx
 ```
 
-从检查点推断网络结构。嵌入硬编码的 DR02_pro 元数据（关节名称、刚度/阻尼、动作缩放）。
+两种导出方式均兼容 [deep-robotics-sdk2](https://github.com/DeepRoboticsLab/deep-robotics-sdk2)。部署时，将动作 NPZ 复制到 SDK 仓库的 `src/dr02_pro/state_machine/motion_data/`，将策略 ONNX 复制到 `src/dr02_pro/state_machine/policy/`。详细部署步骤请参考 SDK 仓库。
 
 ## 8. 工具
 
